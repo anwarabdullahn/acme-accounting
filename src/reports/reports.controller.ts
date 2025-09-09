@@ -1,14 +1,14 @@
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
-import { Controller, Get, Post, HttpCode } from '@nestjs/common';
+import { Controller, Get, HttpCode } from '@nestjs/common';
 import { ReportsService } from './reports.service';
 
 @Controller('api/v1/reports')
 export class ReportsController {
   constructor(private reportsService: ReportsService) {}
 
-  @Get()
+  @Get('/status')
   report() {
     return {
       'accounts.csv': this.reportsService.state('accounts'),
@@ -17,7 +17,7 @@ export class ReportsController {
     };
   }
 
-  @Post()
+  @Get()
   @HttpCode(202)
   generate() {
     setImmediate(() => {
