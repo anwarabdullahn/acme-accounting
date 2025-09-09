@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-call */
 import {
   Body,
   ConflictException,
@@ -6,6 +7,7 @@ import {
   InternalServerErrorException,
   Post,
 } from '@nestjs/common';
+
 import { Company } from '../../db/models/Company';
 import {
   Ticket,
@@ -14,6 +16,7 @@ import {
   TicketType,
 } from '../../db/models/Ticket';
 import { User, UserRole } from '../../db/models/User';
+import { Op } from 'sequelize';
 
 interface newTicketDto {
   type: TicketType;
@@ -42,54 +45,58 @@ export class TicketsController {
     const category = this.getTicketCategory(type);
     const userRole = this.getUserRole(type);
 
-    const registrationAddressChangeTickets = await Ticket.findAll({
-      where: {
-        companyId,
-        category: TicketCategory.corporate,
-        type: TicketType.registrationAddressChange,
-        status: TicketStatus.open,
-      },
-    });
-
-    if (
-      type === TicketType.registrationAddressChange &&
-      registrationAddressChangeTickets.length > 1
-    ) {
-      throw new ConflictException(
-        `duplicate error crating ticket ${category} already exist for company ${companyId}`,
-      );
+    if (type === TicketType.registrationAddressChange) {
+      const openCount = await Ticket.count({
+        where: {
+          companyId,
+          category: TicketCategory.corporate,
+          type: TicketType.registrationAddressChange,
+          status: TicketStatus.open,
+        },
+      });
+      if (openCount >= 1) {
+        throw new ConflictException(
+          `Duplicate error creating ticket: ${category} already exists for company ${companyId}`,
+        );
+      }
     }
 
-    let assignees = await User.findAll({
+    let assignee = await User.findOne({
       where: { companyId, role: userRole },
       order: [['createdAt', 'DESC']],
     });
 
-    if (!assignees.length && type === TicketType.registrationAddressChange) {
-      const directors = await User.findAll({
+    if (!assignee && type === TicketType.registrationAddressChange) {
+      const directors = await User.count({
         where: { companyId, role: UserRole.director },
-        order: [['createdAt', 'DESC']],
       });
 
-      if (directors.length > 1) {
+      if (directors > 1) {
         throw new ConflictException(
           `Multiple users with role ${UserRole.director}. Cannot create a ticket`,
         );
       }
-      assignees = directors;
+      assignee = await User.findOne({
+        where: { companyId, role: UserRole.director },
+        order: [['createdAt', 'DESC']],
+      });
     }
 
-    if (!assignees.length)
+    if (!assignee)
       throw new ConflictException(
         `Cannot find user with role ${userRole} to create a ticket`,
       );
 
-    if (userRole === UserRole.corporateSecretary && assignees.length > 1)
-      throw new ConflictException(
-        `Multiple users with role ${userRole}. Cannot create a ticket`,
-      );
-
-    const assignee = assignees[0];
+    if (userRole === UserRole.corporateSecretary) {
+      const csCount = await User.count({
+        where: { companyId, role: UserRole.corporateSecretary },
+      });
+      if (csCount > 1) {
+        throw new ConflictException(
+          `Multiple users with role ${userRole}. Cannot create a ticket.`,
+        );
+      }
+    }
 
     try {
       const ticket = await Ticket.create({
@@ -101,7 +108,7 @@ export class TicketsController {
       });
 
       if (type === TicketType.strikeOff) {
-        this.resolveOtherTickets(companyId);
+        this.resolveOtherTickets(companyId, ticket.id);
       }
 
       const ticketDto: TicketDto = {
@@ -145,10 +152,16 @@ export class TicketsController {
     }
   }
 
-  private resolveOtherTickets(companyId: number) {
+  private resolveOtherTickets(companyId: number, ticketId: number) {
     void Ticket.update(
       { status: TicketStatus.resolved },
-      { where: { companyId, status: TicketStatus.open } },
+      {
+        where: {
+          companyId,
+          status: TicketStatus.open,
+          id: { [Op.ne]: ticketId },
+        },
+      },
     );
   }
 }
