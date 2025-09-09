@@ -1,3 +1,6 @@
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-unsafe-call */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
 import { Controller, Get, Post, HttpCode } from '@nestjs/common';
 import { ReportsService } from './reports.service';
 
@@ -15,11 +18,16 @@ export class ReportsController {
   }
 
   @Post()
-  @HttpCode(201)
+  @HttpCode(202)
   generate() {
-    this.reportsService.accounts();
-    this.reportsService.yearly();
-    this.reportsService.fs();
-    return { message: 'finished' };
+    setImmediate(() => {
+      void this.reportsService.generateAll().catch((err) => {
+        // Minimal logging; detailed handling will come in later steps
+        // of the performance plan.
+        // eslint-disable-next-line no-console
+        console.error('Report generation failed:', err);
+      });
+    });
+    return { message: 'started' };
   }
 }

@@ -64,7 +64,7 @@ export class TicketsController {
         order: [['createdAt', 'DESC']],
       });
 
-      if (assignees.length > 1) {
+      if (directors.length > 1) {
         throw new ConflictException(
           `Multiple users with role ${UserRole.director}. Cannot create a ticket`,
         );
