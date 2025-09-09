@@ -1,4 +1,11 @@
-import { Body, ConflictException, Controller, Get, Post } from '@nestjs/common';
+import {
+  Body,
+  ConflictException,
+  Controller,
+  Get,
+  InternalServerErrorException,
+  Post,
+} from '@nestjs/common';
 import { Company } from '../../db/models/Company';
 import {
   Ticket,
@@ -84,28 +91,32 @@ export class TicketsController {
 
     const assignee = assignees[0];
 
-    if (type === TicketType.strikeOff) {
-      this.resolveOtherTickets(companyId);
+    try {
+      const ticket = await Ticket.create({
+        companyId,
+        assigneeId: assignee.id,
+        category,
+        type,
+        status: TicketStatus.open,
+      });
+
+      if (type === TicketType.strikeOff) {
+        this.resolveOtherTickets(companyId);
+      }
+
+      const ticketDto: TicketDto = {
+        id: ticket.id,
+        type: ticket.type,
+        assigneeId: ticket.assigneeId,
+        status: ticket.status,
+        category: ticket.category,
+        companyId: ticket.companyId,
+      };
+
+      return ticketDto;
+    } catch (error) {
+      throw new InternalServerErrorException(String(error));
     }
-
-    const ticket = await Ticket.create({
-      companyId,
-      assigneeId: assignee.id,
-      category,
-      type,
-      status: TicketStatus.open,
-    });
-
-    const ticketDto: TicketDto = {
-      id: ticket.id,
-      type: ticket.type,
-      assigneeId: ticket.assigneeId,
-      status: ticket.status,
-      category: ticket.category,
-      companyId: ticket.companyId,
-    };
-
-    return ticketDto;
   }
 
   private getTicketCategory(type: TicketType): TicketCategory {
