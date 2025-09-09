@@ -1,20 +1,20 @@
 # Reports Performance Improvement Plan
 
 ## Summary
-Speed up reports by eliminating blocking I/O, reducing duplicate work, and making the POST endpoint non-blocking. We’ll compute all report files in a single streamed pass over input CSVs and expose clearer progress states.
+Speed up reports by eliminating blocking I/O, reducing duplicate work, and making the GET endpoint non-blocking. We’ll compute all report files in a single streamed pass over input CSVs and expose clearer progress states.
 
-- Target endpoints: `POST /api/v1/reports`, `GET /api/v1/reports`
+- Target endpoints: `GET /api/v1/reports`, `GET /api/v1/reports`
 - Affected files: `src/reports/reports.controller.ts`, `src/reports/reports.service.ts`
-- Key outcomes: near-zero request latency for POST, single-pass processing, async/streaming FS, concurrency guard, clearer state reporting
+- Key outcomes: near-zero request latency for GET, single-pass processing, async/streaming FS, concurrency guard, clearer state reporting
 
 ## Current Pain Points
 - Blocking I/O: `fs.readdirSync/readFileSync/writeFileSync` block the Node event loop.
 - Triple scanning: Each report scans `tmp/` and re-reads files independently.
-- Request blocking: `POST` holds the connection until all work completes.
+- Request blocking: `GET` holds the connection until all work completes.
 - Hot-path overhead: per-line `new Date(...)` and repeated `parseFloat(String(...))` calls.
 
 ## Goals
-- Non-blocking `POST` returning quickly with `202` and background generation.
+- Non-blocking `GET` returning quickly with `202` and background generation.
 - Single-pass processing: read CSVs once, derive all outputs in the same iteration.
 - Async, streaming I/O to avoid blocking and reduce memory.
 - Concurrency guard to prevent overlapping runs.
@@ -26,7 +26,7 @@ Speed up reports by eliminating blocking I/O, reducing duplicate work, and makin
 
 ## Plan & Progress
 - [x] 0. Document plan (this file)
-- [x] 1. Controller: make `POST` non-blocking with `@HttpCode(202)`; call a single `generateAll()` entrypoint
+- [x] 1. Controller: make `GET` non-blocking with `@HttpCode(202)`; call a single `generateAll()` entrypoint
 - [x] 2. Concurrency guard: prevent overlapping runs (e.g., `this.running` + try/finally)
 - [x] 3. Single-pass pipeline: stream CSVs once and compute Accounts, Yearly, and FS in one pass
 - [x] 4. Async I/O: replace sync FS with `fs/promises` + `createReadStream` + `readline`; ensure `out/` exists
@@ -37,7 +37,7 @@ Speed up reports by eliminating blocking I/O, reducing duplicate work, and makin
 
 ## Implementation Outline
 1) Controller (`src/reports/reports.controller.ts`)
-- Change `POST` to return `202` immediately.
+- Change `GET` to return `202` immediately.
 - Fire-and-forget: `void this.reportsService.generateAll().catch(/* log & set error state */)`.
 
 2) Service (`src/reports/reports.service.ts`)
@@ -57,16 +57,16 @@ Speed up reports by eliminating blocking I/O, reducing duplicate work, and makin
 - Keep `GET` response keys (`'accounts.csv'`, `'yearly.csv'`, `'fs.csv'`). Values become status strings or structured objects; if structure changes, include both string summary and detail fields.
 
 ## Acceptance Criteria
-- `POST /api/v1/reports` responds in ~<50ms under idle load.
+- `GET /api/v1/reports` responds in ~<50ms under idle load.
 - `tmp/` is scanned once per run; no sync FS calls remain in reports code.
-- No overlapping runs; concurrent `POST`s do not start duplicate work.
+- No overlapping runs; concurrent `GET`s do not start duplicate work.
 - Outputs match prior format and semantics for the same inputs.
 - `GET /api/v1/reports` shows clear status and timing for each report.
 
 ## Risks & Mitigations
 - Input format variance: if dates are not ISO, fall back to `new Date(date).getFullYear()` behind a try/catch or format check.
 - Large files: streaming avoids OOM; ensure backpressure by line-by-line processing.
-- Error visibility: set error state and log; do not fail the `POST` request.
+- Error visibility: set error state and log; do not fail the `GET` request.
 
 ## Rollout
 - Implement steps 1–6 behind a small PR; verify locally with sample CSVs in `tmp/`.
