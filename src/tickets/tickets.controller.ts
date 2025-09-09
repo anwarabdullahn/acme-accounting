@@ -32,21 +32,45 @@ export class TicketsController {
   @Post()
   async create(@Body() newTicketDto: newTicketDto) {
     const { type, companyId } = newTicketDto;
+    const category = this.getTicketCategory(type);
+    const userRole = this.getUserRole(type);
 
-    const category =
-      type === TicketType.managementReport
-        ? TicketCategory.accounting
-        : TicketCategory.corporate;
+    const registrationAddressChangeTickets = await Ticket.findAll({
+      where: {
+        companyId,
+        category: TicketCategory.corporate,
+        type: TicketType.registrationAddressChange,
+        status: TicketStatus.open,
+      },
+    });
 
-    const userRole =
-      type === TicketType.managementReport
-        ? UserRole.accountant
-        : UserRole.corporateSecretary;
+    if (
+      type === TicketType.registrationAddressChange &&
+      registrationAddressChangeTickets.length > 1
+    ) {
+      throw new ConflictException(
+        `duplicate error crating ticket ${category} already exist for company ${companyId}`,
+      );
+    }
 
-    const assignees = await User.findAll({
+    let assignees = await User.findAll({
       where: { companyId, role: userRole },
       order: [['createdAt', 'DESC']],
     });
+
+    if (!assignees.length && type === TicketType.registrationAddressChange) {
+      const directors = await User.findAll({
+        where: { companyId, role: UserRole.director },
+        order: [['createdAt', 'DESC']],
+      });
+
+      if (assignees.length > 1) {
+        throw new ConflictException(
+          `Multiple users with role ${UserRole.director}. Cannot create a ticket`,
+        );
+      }
+      assignees = directors;
+    }
 
     if (!assignees.length)
       throw new ConflictException(
@@ -59,6 +83,10 @@ export class TicketsController {
       );
 
     const assignee = assignees[0];
+
+    if (type === TicketType.strikeOff) {
+      this.resolveOtherTickets(companyId);
+    }
 
     const ticket = await Ticket.create({
       companyId,
@@ -78,5 +106,38 @@ export class TicketsController {
     };
 
     return ticketDto;
+  }
+
+  private getTicketCategory(type: TicketType): TicketCategory {
+    switch (type) {
+      case TicketType.managementReport:
+        return TicketCategory.accounting;
+      case TicketType.registrationAddressChange:
+        return TicketCategory.corporate;
+      case TicketType.strikeOff:
+        return TicketCategory.management;
+      default:
+        return TicketCategory.accounting;
+    }
+  }
+
+  private getUserRole(type: TicketType): UserRole {
+    switch (type) {
+      case TicketType.managementReport:
+        return UserRole.accountant;
+      case TicketType.registrationAddressChange:
+        return UserRole.corporateSecretary;
+      case TicketType.strikeOff:
+        return UserRole.director;
+      default:
+        return UserRole.accountant;
+    }
+  }
+
+  private resolveOtherTickets(companyId: number) {
+    void Ticket.update(
+      { status: TicketStatus.resolved },
+      { where: { companyId, status: TicketStatus.open } },
+    );
   }
 }
